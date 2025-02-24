@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>謙數獨</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://via.placeholder.com/180x180.png?text=謙數獨">
+    <link rel="manifest" href="/manifest.json">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            overscroll-behavior: none;
+            transition: background 0.3s, color 0.3s;
+        }
+        .light-theme { background: #f2f2f7; color: #000; }
+        .dark-theme { background: #1c2526; color: #fff; }
+        .dark-theme .cell { background: #2c3e50; color: #fff; }
+        .dark-theme .cell:read-only { background: #34495e; color: #fff; }
+        .dark-theme .cell.error { background: #ff6b6b; }
+        .dark-theme .cell.selected { background: #3498db; }
+        .dark-theme .number-btn { background: #34495e; border-color: #2c3e50; color: #fff; }
+        .dark-theme .number-btn:hover { background: #3e5c76; }
+        .header {
+            width: 100%;
+            max-width: 360px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .title { font-size: 18px; font-weight: 600; }
+        .timer { font-size: 14px; color: #666; }
+        .dark-theme .timer { color: #ccc; }
+        .difficulty select {
+            padding: 4px 8px;
+            border-radius: 8px;
+            border: 1px solid #d1d1d6;
+            background: #fff;
+            font-size: 14px;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23000000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            padding-right: 20px;
+        }
+        .dark-theme .difficulty select { background: #34495e; color: #fff; border-color: #2c3e50; }
+        .theme-btn, .modal-btn, .complete-btn, .new-game-btn {
+            padding: 5px 12px;
+            border: none;
+            border-radius: 20px;
+            background: #007aff;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .theme-btn:hover, .modal-btn:hover, .complete-btn:hover, .new-game-btn:hover { background: #005ecb; }
+        .sudoku-container {
+            position: relative;
+            background: #d1d1d6;
+            padding: 4px;
+            border-radius: 12px;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+            width: 368px; /* 調整寬度以適應加粗邊框 */
+        }
+        .dark-theme .sudoku-container { background: #2c3e50; }
+        .sudoku-grid {
+            display: grid;
+            grid-template-columns: repeat(9, 40px);
+            gap: 1px;
+            background: #d1d1d6;
+        }
+        .dark-theme .sudoku-grid { background: #2c3e50; }
+        .cell {
+            width: 40px;
+            height: 40px;
+            border: none;
+            text-align: center;
+            font-size: 18px;
+            background: #fff;
+            border-radius: 4px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            transition: background 0.2s;
+            cursor: pointer;
+            position: relative;
+        }
+        .cell:read-only { background: #e8ecef; color: #000; font-weight: 600; }
+        .cell.error { background: #ffdad7; }
+        .cell.selected { background: #cce5ff; }
+        /* 九宮格邊框 */
+        .cell:nth-child(3n):not(:nth-child(9n)) { border-right: 2px solid #999; }
+        .cell:nth-child(9n) { border-right: 2px solid #999; }
+        .cell:nth-child(n+19):nth-child(-n+27),
+        .cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 2px solid #999; }
+        .dark-theme .cell:nth-child(3n):not(:nth-child(9n)),
+        .dark-theme .cell:nth-child(9n),
+        .dark-theme .cell:nth-child(n+19):nth-child(-n+27),
+        .dark-theme .cell:nth-child(n+46):nth-child(-n+54) { border-color: #5d829c; }
+        .controls {
+            width: 100%;
+            max-width: 360px;
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            margin-bottom: 15px;
+        }
+        .number-pad {
+            width: 100%;
+            max-width: 360px;
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            gap: 5px;
+        }
+        .number-btn {
+            padding: 10px;
+            background: #ffffff;
+            border: 1px solid #d1d1d6;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .number-btn:hover { background: #e8ecef; }
+        .modal {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            color: #000;
+            z-index: 1000;
+            text-align: center;
+            width: 220px;
+            backdrop-filter: blur(5px);
+        }
+        .dark-theme .modal { background: rgba(44, 62, 80, 0.95); color: #fff; }
+        .modal-buttons {
+            margin-top: 12px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body class="light-theme">
+    <div class="header">
+        <div class="title">謙數獨</div>
+        <div class="difficulty">
+            <select id="difficultySelect">
+                <option value="practice">思考模式</option>
+                <option value="easy">簡單</option>
+                <option value="medium">中等</option>
+                <option value="hard">困難</option>
+            </select>
+        </div>
+        <button class="theme-btn" onclick="toggleTheme()">切換主題</button>
+    </div>
+    <div class="timer" id="timer">00:00</div>
+
+    <div class="sudoku-container">
+        <div class="sudoku-grid" id="sudokuGrid"></div>
+        <div class="modal" id="difficultyModal">
+            <p>確定要切換難度嗎？</p>
+            <div class="modal-buttons">
+                <button class="modal-btn" onclick="confirmDifficulty()">確定</button>
+                <button class="modal-btn" onclick="cancelDifficulty()">取消</button>
+            </div>
+        </div>
+        <div class="modal" id="completeModal">
+            <p>確定要完成並檢查答案嗎？</p>
+            <div class="modal-buttons">
+                <button class="modal-btn" onclick="confirmComplete()">確定</button>
+                <button class="modal-btn" onclick="cancelComplete()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="complete-btn" onclick="showCompleteModal()">完成</button>
+        <button class="new-game-btn" onclick="startNewGame()">新遊戲</button>
+        <button class="complete-btn" onclick="promptAddToHomeScreen()">添加到主畫面</button>
+    </div>
+
+    <div class="number-pad" id="numberPad"></div>
+
+    <script>
+        let currentTheme = 'light';
+        let currentDifficulty = 'practice';
+        let originalPuzzle;
+        let solution;
+        let selectedCell = null;
+        let timerInterval;
+        let seconds = 0;
+
+        function toggleTheme() {
+            currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+            document.body.className = currentTheme + '-theme';
+            renderNumberPad();
+        }
+
+        function generateSudoku() {
+            let board = Array(9).fill().map(() => Array(9).fill(0));
+            solveSudoku(board);
+            solution = board.map(row => [...row]);
+            originalPuzzle = removeNumbers(board, currentDifficulty);
+            renderGrid();
+            resetTimer();
+        }
+
+        function solveSudoku(board) {
+            function findEmpty(board) {
+                for (let i = 0; i < 9; i++) {
+                    for (let j = 0; j < 9; j++) {
+                        if (board[i][j] === 0) return [i, j];
+                    }
+                }
+                return null;
+            }
+
+            function isValid(board, num, pos) {
+                for (let x = 0; x < 9; x++) {
+                    if (board[pos[0]][x] === num || board[x][pos[1]] === num) return false;
+                }
+                let startRow = Math.floor(pos[0] / 3) * 3;
+                let startCol = Math.floor(pos[1] / 3) * 3;
+                for (let i = 0; i < 3; i++) {
+                    for (let j = 0; j < 3; j++) {
+                        if (board[startRow + i][startCol + j] === num) return false;
+                    }
+                }
+                return true;
+            }
+
+            let empty = findEmpty(board);
+            if (!empty) return true;
+            let [row, col] = empty;
+
+            let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+            shuffle(numbers);
+
+            for (let num of numbers) {
+                if (isValid(board, num, [row, col])) {
+                    board[row][col] = num;
+                    if (solveSudoku(board)) return true;
+                    board[row][col] = 0;
+                }
+            }
+            return false;
+        }
+
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        function removeNumbers(board, difficulty) {
+            let count;
+            switch (difficulty) {
+                case 'practice': count = 30; break;
+                case 'easy': count = 40; break;
+                case 'medium': count = 50; break;
+                case 'hard': count = 60; break;
+            }
+            let newBoard = board.map(row => [...row]);
+            while (count > 0) {
+                let row = Math.floor(Math.random() * 9);
+                let col = Math.floor(Math.random() * 9);
+                if (newBoard[row][col] !== 0) {
+                    newBoard[row][col] = 0;
+                    count--;
+                }
+            }
+            return newBoard;
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById('sudokuGrid');
+            grid.innerHTML = '';
+            for (let i = 0; i < 9; i++) {
+                for (let j = 0; j < 9; j++) {
+                    const input = document.createElement('div');
+                    input.className = 'cell';
+                    if (originalPuzzle[i][j] !== 0) {
+                        input.textContent = originalPuzzle[i][j];
+                        input.setAttribute('data-readonly', 'true');
+                    }
+                    input.addEventListener('click', () => selectCell(input));
+                    grid.appendChild(input);
+                }
+            }
+        }
+
+        function selectCell(cell) {
+            if (cell.getAttribute('data-readonly')) return;
+            if (selectedCell) selectedCell.classList.remove('selected');
+            selectedCell = cell;
+            selectedCell.classList.add('selected');
+        }
+
+        function renderNumberPad() {
+            const pad = document.getElementById('numberPad');
+            pad.innerHTML = '';
+            for (let i = 1; i <= 9; i++) {
+                const btn = document.createElement('div');
+                btn.className = 'number-btn';
+                btn.textContent = i;
+                btn.addEventListener('click', () => fillNumber(i));
+                pad.appendChild(btn);
+            }
+        }
+
+        function fillNumber(number) {
+            if (selectedCell) {
+                selectedCell.textContent = number;
+                selectedCell.classList.remove('selected');
+                selectedCell = null;
+            }
+        }
+
+        function showCompleteModal() {
+            document.getElementById('completeModal').style.display = 'block';
+        }
+
+        function confirmComplete() {
+            document.getElementById('completeModal').style.display = 'none';
+            checkSolution();
+            clearInterval(timerInterval);
+        }
+
+        function cancelComplete() {
+            document.getElementById('completeModal').style.display = 'none';
+        }
+
+        function checkSolution() {
+            const cells = document.querySelectorAll('.cell');
+            let index = 0;
+            for (let i = 0; i < 9; i++) {
+                for (let j = 0; j < 9; j++) {
+                    const userValue = parseInt(cells[index].textContent) || 0;
+                    if (!cells[index].getAttribute('data-readonly') && userValue !== solution[i][j]) {
+                        cells[index].classList.add('error');
+                    } else {
+                        cells[index].classList.remove('error');
+                    }
+                    cells[index].textContent = solution[i][j];
+                    index++;
+                }
+            }
+        }
+
+        let pendingDifficulty = null;
+        document.getElementById('difficultySelect').addEventListener('change', (e) => {
+            pendingDifficulty = e.target.value;
+            document.getElementById('difficultyModal').style.display = 'block';
+        });
+
+        function confirmDifficulty() {
+            currentDifficulty = pendingDifficulty;
+            document.getElementById('difficultyModal').style.display = 'none';
+            generateSudoku();
+        }
+
+        function cancelDifficulty() {
+            document.getElementById('difficultyModal').style.display = 'none';
+            document.getElementById('difficultySelect').value = currentDifficulty;
+        }
+
+        function promptAddToHomeScreen() {
+            if (window.matchMedia('(display-mode: standalone)').matches) {
+                alert('已經在主畫面中運行！');
+            } else {
+                alert('請使用瀏覽器選單中的「添加到主畫面」功能安裝此應用');
+            }
+        }
+
+        function startNewGame() {
+            generateSudoku();
+        }
+
+        function updateTimer() {
+            seconds++;
+            let minutes = Math.floor(seconds / 60);
+            let secs = seconds % 60;
+            document.getElementById('timer').textContent = 
+                `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function resetTimer() {
+            clearInterval(timerInterval);
+            seconds = 0;
+            document.getElementById('timer').textContent = '00:00';
+            timerInterval = setInterval(updateTimer, 1000);
+        }
+
+        generateSudoku();
+        renderNumberPad();
+    </script>
+</body>
+</html>
