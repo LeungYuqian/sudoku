@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>謙數獨</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            background: #f2f2f7;
+            color: #000;
+        }
+        .header {
+            width: 100%;
+            max-width: 360px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .title { font-size: 18px; font-weight: 600; }
+        .timer { font-size: 14px; color: #666; }
+        .score { font-size: 14px; color: #666; text-align: center; margin: 5px 0; }
+        .level-info { font-size: 14px; color: #666; text-align: center; margin: 5px 0; }
+        .level-select select {
+            padding: 4px 8px;
+            border-radius: 8px;
+            border: 1px solid #d1d1d6;
+            background: #fff;
+            font-size: 14px;
+        }
+        .btn {
+            padding: 5px 12px;
+            border: none;
+            border-radius: 20px;
+            background: #007aff;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #005ecb; }
+        .sudoku-container {
+            position: relative;
+            background: #d1d1d6;
+            padding: 4px;
+            border-radius: 12px;
+            width: 368px;
+        }
+        .sudoku-grid {
+            display: grid;
+            grid-template-columns: repeat(9, 40px);
+            gap: 1px;
+            background: #d1d1d6;
+        }
+        .cell {
+            width: 40px;
+            height: 40px;
+            border: none;
+            text-align: center;
+            font-size: 18px;
+            background: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+            position: relative;
+        }
+        .cell:read-only { background: #e8ecef; font-weight: 600; }
+        .cell.error { background: #ffdad7; }
+        .cell.selected { background: #cce5ff; }
+        .cell .note {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            font-size: 10px;
+            color: #666;
+        }
+        .cell:nth-child(3n):not(:nth-child(9n)) { border-right: 2px solid #999; }
+        .cell:nth-child(9n) { border-right: 2px solid #999; }
+        .cell:nth-child(n+19):nth-child(-n+27),
+        .cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 2px solid #999; }
+        .controls {
+            width: 100%;
+            max-width: 360px;
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        .number-pad-container {
+            width: 100%;
+            max-width: 360px;
+            margin-bottom: 10px;
+        }
+        .number-pad {
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            gap: 5px;
+        }
+        .number-btn {
+            padding: 10px;
+            background: #ffffff;
+            border: 1px solid #d1d1d6;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .note-pad {
+            display: flex;
+            align-items: center;
+            margin-top: 5px;
+            display: none;
+        }
+        .note-pad input {
+            width: 40px;
+            height: 40px;
+            text-align: center;
+            font-size: 16px;
+            border: 1px solid #d1d1d6;
+            border-radius: 8px;
+            margin-right: 10px;
+            pointer-events: none;
+        }
+        .note-pad span { font-size: 12px; color: #666; }
+        .modal {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            color: #000;
+            z-index: 1000;
+            text-align: center;
+            width: 220px;
+        }
+        .modal-buttons { margin-top: 12px; display: flex; gap: 10px; justify-content: center; }
+        .auth-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+        .auth-box {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            width: 300px;
+            text-align: center;
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .auth-box h1 {
+            font-size: 32px;
+            margin-bottom: 20px;
+            color: #007aff;
+        }
+        .auth-box input {
+            display: block;
+            width: 80%;
+            margin: 10px auto;
+            padding: 8px;
+            border: 1px solid #d1d1d6;
+            border-radius: 8px;
+        }
+        .auth-box .btn { margin: 5px; }
+        .leaderboard-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            display: none;
+        }
+        .leaderboard-box {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            width: 300px;
+            text-align: center;
+        }
+        .leaderboard-box table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        .leaderboard-box th, .leaderboard-box td {
+            padding: 8px;
+            border-bottom: 1px solid #d1d1d6;
+        }
+        .leaderboard-box th { background: #e8ecef; }
+        #gameContainer { display: none; }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div class="header">
+            <div class="title">謙數獨</div>
+            <div class="level-select">
+                <select id="levelSelect"></select>
+            </div>
+            <i class="fas fa-trophy" onclick="showLeaderboard()"></i>
+        </div>
+        <div class="timer" id="timer">00:00</div>
+        <div class="score" id="score">分數: 100</div>
+        <div class="level-info" id="levelInfo">共 20 關，當前關卡 1</div>
+
+        <div class="sudoku-container">
+            <div class="sudoku-grid" id="sudokuGrid"></div>
+            <div class="modal" id="completeModal">
+                <p>恭喜完成關卡！</p>
+                <p id="levelScoreText"></p>
+                <div class="modal-buttons">
+                    <button class="btn" onclick="nextLevel()">下一關</button>
+                </div>
+            </div>
+            <div class="modal" id="errorModal">
+                <p>答案錯誤</p>
+            </div>
+            <div class="modal" id="loseModal">
+                <p>分數歸零，遊戲失敗！</p>
+                <div class="modal-buttons">
+                    <button class="btn" onclick="restartLevel()">重新開始</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="btn" onclick="checkLevel()">提交答案</button>
+            <button class="btn" onclick="resetLevel()">重置關卡</button>
+            <button class="btn" onclick="logout()">登出</button>
+        </div>
+
+        <div class="number-pad-container">
+            <div class="number-pad" id="numberPad"></div>
+            <div class="note-pad" id="notePad">
+                <input type="number" id="noteInput" min="1" max="9" readonly>
+                <span>筆記格：點擊上方 1-9 填入</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="auth-container" id="loginContainer">
+        <div class="auth-box">
+            <h1><i class="fas fa-puzzle-piece"></i> 謙數獨</h1>
+            <input type="text" id="loginGameName" placeholder="遊戲名稱">
+            <input type="password" id="loginPassword" placeholder="密碼">
+            <button class="btn" onclick="login()"><i class="fas fa-sign-in-alt"></i> 登入</button>
+            <button class="btn" onclick="showRegister()"><i class="fas fa-user-plus"></i> 註冊</button>
+            <button class="btn" onclick="guestLogin()"><i class="fas fa-user-secret"></i> 訪客登入</button>
+        </div>
+    </div>
+
+    <div class="auth-container" id="registerContainer" style="display: none;">
+        <div class="auth-box">
+            <h1><i class="fas fa-puzzle-piece"></i> 謙數獨</h1>
+            <input type="text" id="registerGameName" placeholder="遊戲名稱">
+            <input type="password" id="registerPassword" placeholder="密碼（2英文+6數字）">
+            <button class="btn" onclick="register()"><i class="fas fa-user-plus"></i> 註冊</button>
+            <button class="btn" onclick="showLogin()"><i class="fas fa-arrow-left"></i> 返回登入</button>
+        </div>
+    </div>
+
+    <div class="leaderboard-container" id="leaderboardContainer">
+        <div class="leaderboard-box">
+            <h3>排行榜</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>名次</th>
+                        <th>遊戲名稱</th>
+                        <th>通關數</th>
+                        <th>最高分</th>
+                    </tr>
+                </thead>
+                <tbody id="leaderboardList"></tbody>
+            </table>
+            <button class="btn" onclick="hideLeaderboard()">關閉</button>
+        </div>
+    </div>
+
+    <script>
+        let levels = [];
+        let currentLevel = 0;
+        let unlockedLevels = 1;
+        let selectedCell = null;
+        let timerInterval;
+        let seconds = 0;
+        let score = 100;
+        let errors = 0;
+        let currentUser = null;
+        let isGuest = false;
+        let isNoteMode = false;
+
+        function generateLevels(user) {
+            levels = Array.from({ length: 20 }, (_, index) => {
+                const baseDifficulty = Math.floor(index / 5);
+                const difficultyLevels = ['easy', 'medium', 'hard', 'hell'];
+                const difficulty = difficultyLevels[baseDifficulty];
+                const removeCount = 30 + index * 2;
+                let board = Array(9).fill().map(() => Array(9).fill(0));
+                Math.seedrandom(user + index.toString());
+                solveSudoku(board);
+                const solution = board.map(row => [...row]);
+                const initial = removeNumbers(board, removeCount);
+                return { initial, solution, difficulty };
+            });
+        }
+
+        function solveSudoku(board) {
+            function findEmpty(board) {
+                for (let i = 0; i < 9; i++) {
+                    for (let j = 0; j < 9; j++) {
+                        if (board[i][j] === 0) return [i, j];
+                    }
+                }
+                return null;
+            }
+            function isValid(board, num, pos) {
+                for (let x = 0; x < 9; x++) {
+                    if (board[pos[0]][x] === num || board[x][pos[1]] === num) return false;
+                }
+                let startRow = Math.floor(pos[0] / 3) * 3;
+                let startCol = Math.floor(pos[1] / 3) * 3;
+                for (let i = 0; i < 3; i++) {
+                    for (let j = 0; j < 3; j++) {
+                        if (board[startRow + i][startCol + j] === num) return false;
+                    }
+                }
+                return true;
+            }
+            let empty = findEmpty(board);
+            if (!empty) return true;
+            let [row, col] = empty;
+            for (let num = 1; num <= 9; num++) {
+                if (isValid(board, num, [row, col])) {
+                    board[row][col] = num;
+                    if (solveSudoku(board)) return true;
+                    board[row][col] = 0;
+                }
+            }
+            return false;
+        }
+
+        function removeNumbers(board, count) {
+            let newBoard = board.map(row => [...row]);
+            let removed = 0;
+            while (removed < count) {
+                let row = Math.floor(Math.random() * 9);
+                let col = Math.floor(Math.random() * 9);
+                if (newBoard[row][col] !== 0) {
+                    newBoard[row][col] = 0;
+                    removed++;
+                }
+            }
+            return newBoard;
+        }
+
+        function loadLevel(levelIndex) {
+            currentLevel = levelIndex;
+            renderGrid(levels[levelIndex].initial);
+            resetTimer();
+            score = 100;
+            errors = 0;
+            updateScore();
+            updateLevelInfo();
+            selectedCell = null;
+            isNoteMode = false;
+            document.getElementById('levelSelect').value = levelIndex;
+            if (!isGuest) saveProgress();
+            document.getElementById('notePad').style.display = 'none';
+        }
+
+        function renderGrid(puzzle) {
+            const grid = document.getElementById('sudokuGrid');
+            grid.innerHTML = '';
+            for (let i = 0; i < 9; i++) {
+                for (let j = 0; j < 9; j++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    if (puzzle[i][j] !== 0) {
+                        cell.textContent = puzzle[i][j];
+                        cell.setAttribute('data-readonly', 'true');
+                    }
+                    cell.innerHTML += '<span class="note"></span>';
+                    cell.addEventListener('click', () => selectCell(cell));
+                    grid.appendChild(cell);
+                }
+            }
+        }
+
+        function selectCell(cell) {
+            if (cell.getAttribute('data-readonly')) return;
+            if (selectedCell === cell) {
+                isNoteMode = !isNoteMode;
+                document.getElementById('notePad').style.display = isNoteMode ? 'flex' : 'none';
+            } else {
+                if (selectedCell) selectedCell.classList.remove('selected');
+                selectedCell = cell;
+                selectedCell.classList.add('selected');
+                isNoteMode = true;
+                document.getElementById('notePad').style.display = 'flex';
+            }
+            const note = selectedCell.querySelector('.note').textContent;
+            document.getElementById('noteInput').value = note || '';
+        }
+
+        function renderNumberPad() {
+            const pad = document.getElementById('numberPad');
+            pad.innerHTML = '';
+            for (let i = 1; i <= 9; i++) {
+                const btn = document.createElement('div');
+                btn.className = 'number-btn';
+                btn.textContent = i;
+                btn.addEventListener('click', () => {
+                    if (selectedCell) {
+                        if (isNoteMode) {
+                            document.getElementById('noteInput').value = i;
+                            selectedCell.querySelector('.note').textContent = i;
+                            if (!isGuest) saveProgress();
+                        } else {
+                            fillNumber(i);
+                        }
+                    }
+                });
+                pad.appendChild(btn);
+            }
+        }
+
+        function fillNumber(number) {
+            if (!selectedCell) return;
+            const cellIndex = Array.from(document.querySelectorAll('.cell')).indexOf(selectedCell);
+            const row = Math.floor(cellIndex / 9);
+            const col = cellIndex % 9;
+            const correctValue = levels[currentLevel].solution[row][col];
+
+            selectedCell.textContent = number;
+            if (number !== correctValue) {
+                selectedCell.classList.add('error');
+                score = Math.max(0, score - 10);
+                errors++;
+                updateScore();
+                if (score === 0) showLoseModal();
+                const errorModal = document.getElementById('errorModal');
+                errorModal.style.display = 'block';
+                setTimeout(() => errorModal.style.display = 'none', 1000);
+            } else {
+                selectedCell.classList.remove('error');
+            }
+            selectedCell.classList.remove('selected');
+            selectedCell = null;
+            isNoteMode = false;
+            document.getElementById('notePad').style.display = 'none';
+            if (!isGuest) saveProgress();
+        }
+
+        function updateScore() {
+            document.getElementById('score').textContent = `分數: ${score}`;
+        }
+
+        function updateLevelInfo() {
+            document.getElementById('levelInfo').textContent = `共 20 關，當前關卡 ${currentLevel + 1}`;
+        }
+
+        function checkLevel() {
+            const cells = document.querySelectorAll('.cell');
+            let index = 0;
+            let isComplete = true;
+            for (let i = 0; i < 9; i++) {
+                for (let j = 0; j < 9; j++) {
+                    const userValue = parseInt(cells[index].textContent) || 0;
+                    if (userValue !== levels[currentLevel].solution[i][j]) {
+                        isComplete = false;
+                        cells[index].classList.add('error');
+                    } else {
+                        cells[index].classList.remove('error');
+                    }
+                    index++;
+                }
+            }
+            if (isComplete) {
+                clearInterval(timerInterval);
+                score = Math.max(0, score - Math.floor(seconds / 10));
+                updateScore();
+                if (currentLevel + 1 >= unlockedLevels && currentLevel + 1 < levels.length) {
+                    unlockedLevels = currentLevel + 2;
+                    updateLevelSelect();
+                }
+                if (!isGuest) updateLeaderboard();
+                showCompleteModal();
+            }
+        }
+
+        function showCompleteModal() {
+            const modal = document.getElementById('completeModal');
+            document.getElementById('levelScoreText').textContent = `最終分數: ${score}`;
+            modal.style.display = 'block';
+        }
+
+        function showLoseModal() {
+            clearInterval(timerInterval);
+            document.getElementById('loseModal').style.display = 'block';
+        }
+
+        function restartLevel() {
+            document.getElementById('loseModal').style.display = 'none';
+            loadLevel(currentLevel);
+        }
+
+        function nextLevel() {
+            document.getElementById('completeModal').style.display = 'none';
+            if (currentLevel + 1 < levels.length) {
+                loadLevel(currentLevel + 1);
+            } else {
+                alert('恭喜您完成所有關卡！');
+            }
+        }
+
+        function resetLevel() {
+            loadLevel(currentLevel);
+        }
+
+        function updateTimer() {
+            seconds++;
+            let minutes = Math.floor(seconds / 60);
+            let secs = seconds % 60;
+            document.getElementById('timer').textContent = 
+                `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function resetTimer() {
+            clearInterval(timerInterval);
+            seconds = 0;
+            document.getElementById('timer').textContent = '00:00';
+            timerInterval = setInterval(updateTimer, 1000);
+        }
+
+        function updateLevelSelect() {
+            const select = document.getElementById('levelSelect');
+            select.innerHTML = '';
+            for (let i = 0; i < levels.length; i++) {
+                if (i < unlockedLevels) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = `關卡 ${i + 1} (${levels[i].difficulty})`;
+                    select.appendChild(option);
+                }
+            }
+            select.addEventListener('change', (e) => loadLevel(parseInt(e.target.value)));
+        }
+
+        function showLogin() {
+            document.getElementById('loginContainer').style.display = 'flex';
+            document.getElementById('registerContainer').style.display = 'none';
+        }
+
+        function showRegister() {
+            document.getElementById('registerContainer').style.display = 'flex';
+            document.getElementById('loginContainer').style.display = 'none';
+        }
+
+        function register() {
+            const gameName = document.getElementById('registerGameName').value.trim();
+            const password = document.getElementById('registerPassword').value;
+            if (!gameName || /\s/.test(gameName)) {
+                alert('遊戲名稱不可為空白或包含空格');
+                return;
+            }
+            if (!/^(?=.*[A-Za-z].*[A-Za-z])[A-Za-z0-9]{8}$/.test(password)) {
+                alert('密碼必須包含 2 個英文和 6 個數字，共 8 位');
+                return;
+            }
+            let users = JSON.parse(localStorage.getItem('sudokuUsers') || '{}');
+            if (users[gameName]) {
+                alert('遊戲名稱已存在');
+                return;
+            }
+            users[gameName] = { password, progress: { unlockedLevels: 1, currentLevel: 0 }, highScore: 0 };
+            localStorage.setItem('sudokuUsers', JSON.stringify(users));
+            alert('註冊成功，請登入');
+            showLogin();
+        }
+
+        function login() {
+            const gameName = document.getElementById('loginGameName').value;
+            const password = document.getElementById('loginPassword').value;
+            let users = JSON.parse(localStorage.getItem('sudokuUsers') || '{}');
+            if (users[gameName] && users[gameName].password === password) {
+                currentUser = gameName;
+                isGuest = false;
+                unlockedLevels = users[gameName].progress.unlockedLevels;
+                currentLevel = users[gameName].progress.currentLevel;
+                localStorage.setItem('sudokuCurrentUser', gameName);
+                document.getElementById('loginContainer').style.display = 'none';
+                document.getElementById('gameContainer').style.display = 'block';
+                generateLevels(currentUser);
+                loadLevel(currentLevel);
+                updateLevelSelect();
+                renderNumberPad();
+            } else {
+                alert('遊戲名稱或密碼錯誤');
+            }
+        }
+
+        function guestLogin() {
+            currentUser = 'guest_' + Date.now();
+            isGuest = true;
+            unlockedLevels = 1;
+            currentLevel = 0;
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('gameContainer').style.display = 'block';
+            generateLevels(currentUser);
+            loadLevel(currentLevel);
+            updateLevelSelect();
+            renderNumberPad();
+        }
+
+        function logout() {
+            currentUser = null;
+            isGuest = false;
+            localStorage.removeItem('sudokuCurrentUser');
+            document.getElementById('gameContainer').style.display = 'none';
+            showLogin();
+        }
+
+        function saveProgress() {
+            if (!currentUser || isGuest) return;
+            let users = JSON.parse(localStorage.getItem('sudokuUsers') || '{}');
+            users[currentUser].progress = { unlockedLevels, currentLevel };
+            localStorage.setItem('sudokuUsers', JSON.stringify(users));
+        }
+
+        function updateLeaderboard() {
+            if (!currentUser || isGuest) return;
+            let users = JSON.parse(localStorage.getItem('sudokuUsers') || '{}');
+            users[currentUser].highScore = Math.max(users[currentUser].highScore || 0, score);
+            localStorage.setItem('sudokuUsers', JSON.stringify(users));
+        }
+
+        function showLeaderboard() {
+            const leaderboardList = document.getElementById('leaderboardList');
+            leaderboardList.innerHTML = '';
+            let users = JSON.parse(localStorage.getItem('sudokuUsers') || '{}');
+            const leaderboard = Object.entries(users)
+                .map(([gameName, data]) => ({ gameName, cleared: data.progress.unlockedLevels - 1, score: data.highScore || 0 }))
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 5);
+            leaderboard.forEach((entry, index) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${entry.gameName}</td>
+                    <td>${entry.cleared}</td>
+                    <td>${entry.score}</td>
+                `;
+                leaderboardList.appendChild(tr);
+            });
+            document.getElementById('leaderboardContainer').style.display = 'flex';
+        }
+
+        function hideLeaderboard() {
+            document.getElementById('leaderboardContainer').style.display = 'none';
+        }
+
+        const savedUser = localStorage.getItem('sudokuCurrentUser');
+        if (savedUser && JSON.parse(localStorage.getItem('sudokuUsers') || '{}')[savedUser]) {
+            currentUser = savedUser;
+            isGuest = false;
+            let users = JSON.parse(localStorage.getItem('sudokuUsers'));
+            unlockedLevels = users[currentUser].progress.unlockedLevels;
+            currentLevel = users[currentUser].progress.currentLevel;
+            document.getElementById('gameContainer').style.display = 'block';
+            generateLevels(currentUser);
+            loadLevel(currentLevel);
+            updateLevelSelect();
+            renderNumberPad();
+        } else {
+            showLogin();
+        }
+    </script>
+</body>
+</html>
