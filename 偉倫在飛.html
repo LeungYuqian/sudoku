@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>偉倫號 - 都市飛行 (Mobile)</title>
+
+    <!-- Embedded CSS -->
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; color: #333; touch-action: manipulation; background-color: #333; /* Fallback bg */ }
+        canvas { display: block; }
+        #info { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); width: 90%; text-align: center; z-index: 99; /* Below controls */ color: #eee; text-shadow: 1px 1px 2px black; font-size: 0.8em; pointer-events: none; }
+        .dpad-container { position: absolute; bottom: 30px; left: 30px; width: 130px; /* Slightly larger */ height: 130px; display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 3px; z-index: 101; user-select: none; -webkit-user-select: none; }
+        .control-button { width: 55px; height: 55px; background-color: rgba(0, 0, 0, 0.55); color: white; border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 22px; cursor: pointer; font-weight: bold; -webkit-tap-highlight-color: transparent; transition: background-color 0.1s ease; }
+        #btn-up { grid-column: 2; grid-row: 1; } #btn-down { grid-column: 2; grid-row: 3; } #btn-left { grid-column: 1; grid-row: 2; } #btn-right { grid-column: 3; grid-row: 2; }
+        .control-button:active { background-color: rgba(255, 255, 255, 0.6); color: black; }
+
+        /* HUD Styling */
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px; /* Moved HUD to left */
+            background-color: rgba(0, 0, 0, 0.65);
+            color: #00ffcc;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 8px 15px;
+            border-radius: 5px;
+            border: 1px solid rgba(0, 255, 204, 0.4);
+            font-size: 0.9em;
+            text-align: left; /* Align left */
+            z-index: 100;
+            pointer-events: none;
+            min-width: 130px;
+        }
+        #hud div { margin-bottom: 4px; white-space: nowrap; }
+        #hud div:last-child { margin-bottom: 0; }
+        #planeName { font-weight: bold; color: #ffffff; }
+        #pilotName { color: #ffcc00; } /* Yellow for pilot name */
+
+         /* Minimap Styling */
+         #minimapContainer {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 100;
+            border: 2px solid rgba(0, 255, 204, 0.5);
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 3px;
+            pointer-events: none; /* Allow clicks through */
+         }
+         #minimapCanvas {
+             display: block; /* Remove extra space below canvas */
+         }
+
+    </style>
+
+    <!-- Import Map for Three.js -->
+    <script type="importmap"> { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } } </script>
+</head>
+<body>
+    <!-- HUD Elements -->
+    <div id="hud">
+        <div id="planeName">偉倫號</div>
+        <div id="pilotName">駕駛員: 小哈</div>
+        <div id="altitude">ALT: --- m</div>
+        <div id="speed">SPD: --- kph</div>
+    </div>
+
+    <!-- Minimap Container -->
+    <div id="minimapContainer">
+        <canvas id="minimapCanvas" width="150" height="150"></canvas> <!-- Adjust size as needed -->
+    </div>
+
+    <div id="info">觸摸方向按鈕移動 (左右為轉向)</div>
+    <div class="dpad-container">
+        <div id="btn-up" class="control-button">↑</div>
+        <div id="btn-left" class="control-button">←</div>
+        <div id="btn-right" class="control-button">→</div>
+        <div id="btn-down" class="control-button">↓</div>
+    </div>
+
+    <!-- Audio Elements -->
+    <audio id="engineSound" src="path/to/your/engine_loop.mp3" loop preload="auto"></audio>
+    <audio id="crashSound" src="path/to/your/crash_sound.wav" preload="auto"></audio>
+    <audio id="pilotChatter" src="path/to/your/xiao_ha_sound.mp3" preload="auto"></audio>
+
+
+    <!-- Embedded JavaScript -->
+    <script type="module">
+        import * as THREE from 'three';
+
+        let gameStarted = false;
+        let pilotChatterInterval = null;
+
+        // --- Global Elements & State ---
+        const hudAltitude = document.getElementById('altitude');
+        const hudSpeed = document.getElementById('speed');
+        const engineSound = document.getElementById('engineSound');
+        const crashSound = document.getElementById('crashSound');
+        const pilotChatterSound = document.getElementById('pilotChatter');
+        const minimapCanvas = document.getElementById('minimapCanvas');
+        const minimapCtx = minimapCanvas.getContext('2d');
+        const clock = new THREE.Clock();
+        const keysPressed = {};
+        let currentSpeedKPH = 0;
+        let frameCount = 0; // For minimap update throttling
+
+        // --- Constants ---
+        const STRUCTURE_TYPE = { HOUSE: 'house', BUILDING: 'building' };
+
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        const skyboxLoader = new THREE.CubeTextureLoader();
+        const skyboxTexture = skyboxLoader.load([ /* Skybox Paths - REPLACE */
+             'path/to/skybox/px.jpg', 'path/to/skybox/nx.jpg', 'path/to/skybox/py.jpg',
+             'path/to/skybox/ny.jpg', 'path/to/skybox/pz.jpg', 'path/to/skybox/nz.jpg' ]);
+        scene.background = skyboxTexture;
+
+        // --- Fog ---
+        const fogNear = 150; const fogFar = 300; // Increased fog distance for denser city
+        const fogColor = 0x9badc2; // Adjust fog color
+        scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
+
+        // --- Camera ---
+        const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.2, fogFar + 50); // Slightly narrower FOV
+        camera.position.set(0, 10, 18); // Start higher/further for city view
+
+        // --- Renderer ---
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping; // Better color grading
+        renderer.toneMappingExposure = 0.95;
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        scene.add(new THREE.AmbientLight(0x99aabb, 1.2)); // More ambient light for city
+        const dirLight = new THREE.DirectionalLight(0xffeedd, 1.4);
+        dirLight.position.set(40, 50, 25); // Adjust sun angle
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024; dirLight.shadow.mapSize.height = 1024;
+        dirLight.shadow.camera.near = 1; dirLight.shadow.camera.far = 120; // Adjust shadow distance
+        dirLight.shadow.camera.left = -60; dirLight.shadow.camera.right = 60; // Wider shadow area
+        dirLight.shadow.camera.top = 60; dirLight.shadow.camera.bottom = -60;
+        dirLight.shadow.bias = -0.003; // May need tuning
+        scene.add(dirLight);
+        scene.add(dirLight.target);
+
+        // --- Materials ---
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xc0c0c0, metalness: 0.7, roughness: 0.4 }); // Silver
+        const wingMat = new THREE.MeshStandardMaterial({ color: 0xeaeaea, metalness: 0.5, roughness: 0.6 });
+        const engineMat = new THREE.MeshStandardMaterial({ color: 0x505050, metalness: 0.8, roughness: 0.3 });
+        const cockpitMat = new THREE.MeshStandardMaterial({ color: 0x1a2b3c, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.7 });
+        // Building/House Materials (add more variety later if needed)
+        const wallColors = [0xddeeff, 0xffeedd, 0xdddddd, 0xefefef, 0xe0f0e0];
+        const roofColors = [0xcc5544, 0x557799, 0x666666, 0x779977];
+        const buildingWallMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.1 }); // Generic building mat
+        const buildingRoofMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9 });
+        const textureLoader = new THREE.TextureLoader();
+
+        // --- Ground Texture with Roads ---
+        // *** IMPORTANT: Find a texture that looks like ground with roads/streets ***
+        const groundTexture = textureLoader.load('path/to/your/city_ground_roads.jpg'); // REPLACE
+        groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+        groundTexture.repeat.set(30, 30); // Adjust repeat based on texture scale & ground size
+        groundTexture.anisotropy = renderer.capabilities.getMaxAnisotropy(); // Sharper textures at angles
+        const groundMaterial = new THREE.MeshStandardMaterial({
+            map: groundTexture,
+            color: 0xffffff, // Let texture define color mostly
+            side: THREE.DoubleSide,
+            roughness: 1.0,
+            metalness: 0.0
+        });
+
+        // --- Detailed Plane ---
+        function createDetailedPlane() { /* ... (same createDetailedPlane function as before) ... */
+             const planeGroup = new THREE.Group();
+            const fuselageLength = 3.5; const fuselageRadius = 0.35;
+            const fuselageMesh = new THREE.Mesh(new THREE.CylinderGeometry(fuselageRadius * 0.8, fuselageRadius, fuselageLength, 16), bodyMat); fuselageMesh.rotation.x = Math.PI / 2; fuselageMesh.castShadow = true; planeGroup.add(fuselageMesh);
+            const cockpitRadius = fuselageRadius * 1.1;
+            const cockpitMesh = new THREE.Mesh(new THREE.SphereGeometry(cockpitRadius, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), cockpitMat); cockpitMesh.position.set(0, fuselageRadius * 0.6, fuselageLength * 0.3); cockpitMesh.rotation.x = -Math.PI * 0.05; cockpitMesh.castShadow = true; planeGroup.add(cockpitMesh);
+            const wingLength = 2.5; const wingRootChord = 1.0; const wingTipChord = 0.5; const wingThickness = 0.08;
+            function createWingSegment(length, chord, thickness, isLeft) { const wingShape = new THREE.Mesh(new THREE.BoxGeometry(length, thickness, chord), wingMat); wingShape.castShadow = true; return wingShape; }
+            const wingMidPoint = wingLength * 0.4;
+            const leftRootWing = createWingSegment(wingMidPoint, wingRootChord, wingThickness * 1.2, true); leftRootWing.position.set(-wingMidPoint / 2 - fuselageRadius * 0.5, 0, 0);
+            const leftTipWing = createWingSegment(wingLength - wingMidPoint, wingTipChord, wingThickness, true); leftTipWing.position.set(-wingMidPoint - (wingLength - wingMidPoint)/2 - fuselageRadius*0.2, -wingThickness*0.1, wingRootChord*0.1); leftTipWing.rotation.y = -Math.PI / 30;
+            const rightRootWing = createWingSegment(wingMidPoint, wingRootChord, wingThickness * 1.2, false); rightRootWing.position.set(wingMidPoint / 2 + fuselageRadius * 0.5, 0, 0);
+            const rightTipWing = createWingSegment(wingLength - wingMidPoint, wingTipChord, wingThickness, false); rightTipWing.position.set(wingMidPoint + (wingLength - wingMidPoint)/2 + fuselageRadius*0.2, -wingThickness*0.1, wingRootChord*0.1); rightTipWing.rotation.y = Math.PI / 30;
+            planeGroup.add(leftRootWing, leftTipWing, rightRootWing, rightTipWing);
+            const engineLength = 0.8; const engineRadius = 0.2; const engineGeom = new THREE.CylinderGeometry(engineRadius, engineRadius * 0.9, engineLength, 12);
+            const engineYOffset = -engineRadius * 1.1 - wingThickness / 2; const engineXOffset = wingLength * 0.4;
+            const leftEngine = new THREE.Mesh(engineGeom, engineMat); leftEngine.rotation.x = Math.PI / 2; leftEngine.position.set(-engineXOffset, engineYOffset, fuselageLength * 0.05); leftEngine.castShadow = true; planeGroup.add(leftEngine);
+            const rightEngine = new THREE.Mesh(engineGeom, engineMat); rightEngine.rotation.x = Math.PI / 2; rightEngine.position.set(engineXOffset, engineYOffset, fuselageLength * 0.05); rightEngine.castShadow = true; planeGroup.add(rightEngine);
+            const intakeGeom = new THREE.CylinderGeometry(engineRadius * 0.8, engineRadius * 0.8, 0.1, 12); const intakeMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.9, roughness: 0.2});
+            const leftIntake = new THREE.Mesh(intakeGeom, intakeMat); leftIntake.position.z = engineLength / 2 + 0.05; leftEngine.add(leftIntake);
+            const rightIntake = new THREE.Mesh(intakeGeom, intakeMat); rightIntake.position.z = engineLength / 2 + 0.05; rightEngine.add(rightIntake);
+            const tailHeight = 0.8; const tailGeom = new THREE.BoxGeometry(wingThickness * 1.5, tailHeight, wingRootChord * 0.6);
+            const tailFin = new THREE.Mesh(tailGeom, bodyMat); tailFin.position.set(0, tailHeight * 0.5 - fuselageRadius*0.1, -fuselageLength * 0.45); tailFin.rotation.z = Math.PI / 40; tailFin.castShadow = true; planeGroup.add(tailFin);
+            const hStabWidth = 0.7; const hStabChord = 0.5; const hStab = new THREE.Mesh(new THREE.BoxGeometry(hStabWidth * 2, wingThickness * 0.8, hStabChord), wingMat); hStab.position.set(0, fuselageRadius * 0.1, -fuselageLength * 0.48); hStab.castShadow = true; planeGroup.add(hStab);
+            const emitterPoint = new THREE.Object3D(); emitterPoint.position.set(0, 0, -fuselageLength * 0.5); planeGroup.add(emitterPoint); planeGroup.userData.emitter = emitterPoint;
+            return planeGroup;
+        }
+        const plane = createDetailedPlane();
+        plane.position.y = 25; // Start even higher over the city
+        scene.add(plane);
+        camera.lookAt(plane.position);
+
+        // --- Particle Trail ---
+        const maxParticles = 350; const particleLifetime = 2.0;
+        const particleGeometry = new THREE.BufferGeometry(); const particlePositions = new Float32Array(maxParticles * 3); const particleAlphas = new Float32Array(maxParticles);
+        particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3)); particleGeometry.setAttribute('alpha', new THREE.BufferAttribute(particleAlphas, 1));
+        const particleMaterial = new THREE.ShaderMaterial({ uniforms: { color: { value: new THREE.Color(0xffffff) }, pointTexture: { value: textureLoader.load('path/to/your/particle_smoke.png') } }, vertexShader: ` attribute float alpha; varying float vAlpha; void main() { vAlpha = alpha; vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 ); gl_PointSize = ( 10.0 / -mvPosition.z ) * (alpha * 1.1 + 0.2); gl_Position = projectionMatrix * mvPosition; }`, fragmentShader: ` uniform vec3 color; uniform sampler2D pointTexture; varying float vAlpha; void main() { if (vAlpha <= 0.0) discard; gl_FragColor = vec4( color, vAlpha * 0.65 ); gl_FragColor = gl_FragColor * texture2D( pointTexture, gl_PointCoord ); }`, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+        const particles = new THREE.Points(particleGeometry, particleMaterial); scene.add(particles); let particleIndex = 0; const particleData = []; for (let i=0; i < maxParticles; ++i) { particlePositions[i*3+0] = 0; particlePositions[i*3+1] = -1000; particlePositions[i*3+2] = 0; particleAlphas[i] = 0; particleData.push({ index: i, birthTime: -1 }); }
+
+
+        // --- Structure Creation ---
+        function createHouse(w = 2, h = 1.5, d = 2) { /* ... (same createHouse function) ... */
+             const group = new THREE.Group(); const baseH = h * (0.6 + Math.random() * 0.3); const wallMat = buildingWallMat.clone(); wallMat.color.setHex(wallColors[Math.floor(Math.random() * wallColors.length)]); const base = new THREE.Mesh(new THREE.BoxGeometry(w, baseH, d), wallMat); base.position.y = baseH / 2; base.castShadow = true; base.receiveShadow = true; group.add(base); const roofMat = buildingRoofMat.clone(); roofMat.color.setHex(roofColors[Math.floor(Math.random() * roofColors.length)]); const roofH = h * (0.4 + Math.random() * 0.2); const roofType = Math.random(); let roof; if (roofType < 0.6) { roof = new THREE.Mesh(new THREE.ConeGeometry(w * 0.75, roofH, 4), roofMat); roof.rotation.y = Math.PI / 4; } else { roof = new THREE.Mesh(new THREE.BoxGeometry(w, roofH, d*1.02), roofMat); } roof.position.y = baseH + roofH / 2; roof.castShadow = true; group.add(roof); group.userData = { type: STRUCTURE_TYPE.HOUSE, baseHeight: baseH + roofH }; return group;
+        }
+
+        function createBuilding(minW = 3, maxW = 6, minD = 3, maxD = 6, minH = 8, maxH = 40) { // Increased max height
+            const group = new THREE.Group();
+            const w = minW + Math.random() * (maxW - minW);
+            const d = minD + Math.random() * (maxD - minD);
+            const h = minH + Math.random() * (maxH - minH);
+
+            const numBlocks = Math.max(1, Math.floor(Math.random() * 4 + h / 10)); // Adjusted block calculation
+            let currentY = 0;
+            const baseWallMat = buildingWallMat.clone();
+            baseWallMat.color.setHex(wallColors[Math.floor(Math.random() * wallColors.length)]);
+            if(Math.random() < 0.4) baseWallMat.color.lerp(new THREE.Color(0x000000), 0.15); // Darken more buildings
+
+            for(let i=0; i<numBlocks; i++) {
+                const blockH = h / numBlocks * (0.7 + Math.random() * 0.5); // More height variation
+                const blockW = w * (0.85 + Math.random() * 0.3); // More width variation
+                const blockD = d * (0.85 + Math.random() * 0.3);
+                const block = new THREE.Mesh(new THREE.BoxGeometry(blockW, blockH, blockD), baseWallMat);
+                block.position.y = currentY + blockH / 2;
+                block.castShadow = true; block.receiveShadow = true;
+                group.add(block);
+                currentY += blockH;
+            }
+
+            // Simple roof details (maybe add antennas?)
+            const roofDetailGeom = new THREE.BoxGeometry(w * 0.7, h * 0.04, d * 0.7);
+            const roofDetail = new THREE.Mesh(roofDetailGeom, buildingRoofMat.clone().color.lerp(new THREE.Color(0x000000), 0.2)); // Darker roof detail
+            roofDetail.position.y = currentY + h * 0.02;
+            roofDetail.castShadow = true;
+            group.add(roofDetail);
+             if (Math.random() < 0.3 && h > 20) { // Add antenna to some tall buildings
+                 const antennaH = h * (0.1 + Math.random() * 0.1);
+                 const antennaGeom = new THREE.CylinderGeometry(0.1, 0.05, antennaH, 6);
+                 const antenna = new THREE.Mesh(antennaGeom, engineMat); // Reuse engine material
+                 antenna.position.y = currentY + antennaH / 2;
+                 antenna.castShadow = true;
+                 group.add(antenna);
+                 currentY += antennaH; // Add to total height for userData
+             }
+
+            group.userData = { type: STRUCTURE_TYPE.BUILDING, baseHeight: currentY };
+            return group;
+        }
+
+        function createStructure() {
+            if (Math.random() < 0.55) { // Increased chance of building
+                return createBuilding();
+            } else {
+                return createHouse(2 + Math.random()*2, 1.5 + Math.random(), 2 + Math.random()*2); // Smaller houses
+            }
+        }
+
+
+        // --- Create Ground ---
+        const groundSize = 700; // Even larger ground visual
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(groundSize, groundSize, 20, 20), groundMaterial);
+        ground.rotation.x = -Math.PI / 2; ground.position.y = -0.1;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // --- Structure Recycling ---
+        const numStructures = 200; // ** INCREASED STRUCTURE COUNT **
+        const activeStructures = [];
+        const recycleDistance = fogFar * 0.95;
+        const spawnDistanceAheadMin = fogFar * 0.7;
+        const spawnDistanceAheadMax = fogFar * 0.9;
+        const spawnRadius = 120; // Wider spawn area for bigger city
+        const planeForward = new THREE.Vector3();
+        const houseWorldPos = new THREE.Vector3(); // ** Ensure this is defined **
+        const vectorToHouse = new THREE.Vector3();
+        // Init structures
+        for (let i = 0; i < numStructures; i++) {
+            const structure = createStructure();
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * (spawnDistanceAheadMax * 0.9) + 60; // Spread initial structures more
+            structure.position.set( plane.position.x + Math.cos(angle) * dist, 0, plane.position.z + Math.sin(angle) * dist );
+            structure.rotation.y = Math.floor(Math.random() * 4) * Math.PI / 2; // Align to grid
+            activeStructures.push(structure);
+            scene.add(structure);
+        }
+
+        // --- Control Parameters ---
+        const forwardSpeed = 25.0; // Faster speed for larger scale
+        const turnSpeed = 1.3; // Slightly slower turn needed?
+        const verticalSpeed = 8.0;
+        const bankingFactor = 0.85; // Slightly less bank maybe
+        const crashAltitudeThreshold = 1.2; // Higher threshold needed
+        let crashed = false;
+        let crashCooldown = 0;
+
+        // --- Event Listeners & Sound Control ---
+        function handleInteractionStart(keyName) { keysPressed[keyName] = true; if (!gameStarted) { startSounds(); } }
+        function handleInteractionEnd(keyName) { keysPressed[keyName] = false; }
+        function setupControls() { /* ... (same setupControls function) ... */
+             const btnUp = document.getElementById('btn-up'); const btnDown = document.getElementById('btn-down'); const btnLeft = document.getElementById('btn-left'); const btnRight = document.getElementById('btn-right'); btnUp.addEventListener('touchstart', (e) => { e.preventDefault(); handleInteractionStart('arrowup'); }); btnUp.addEventListener('touchend', (e) => { e.preventDefault(); handleInteractionEnd('arrowup'); }); btnUp.addEventListener('touchcancel', (e) => handleInteractionEnd('arrowup')); btnDown.addEventListener('touchstart', (e) => { e.preventDefault(); handleInteractionStart('arrowdown'); }); btnDown.addEventListener('touchend', (e) => { e.preventDefault(); handleInteractionEnd('arrowdown'); }); btnDown.addEventListener('touchcancel', (e) => handleInteractionEnd('arrowdown')); btnLeft.addEventListener('touchstart', (e) => { e.preventDefault(); handleInteractionStart('arrowleft'); }); btnLeft.addEventListener('touchend', (e) => { e.preventDefault(); handleInteractionEnd('arrowleft'); }); btnLeft.addEventListener('touchcancel', (e) => handleInteractionEnd('arrowleft')); btnRight.addEventListener('touchstart', (e) => { e.preventDefault(); handleInteractionStart('arrowright'); }); btnRight.addEventListener('touchend', (e) => { e.preventDefault(); handleInteractionEnd('arrowright'); }); btnRight.addEventListener('touchcancel', (e) => handleInteractionEnd('arrowright')); document.addEventListener('keydown', (event) => { const keyName = event.key.toLowerCase(); if (['arrowup','w','arrowdown','s','arrowleft','a','arrowright','d'].includes(keyName)) { const mappedKey = keyName.replace('w','arrowup').replace('s','arrowdown').replace('a','arrowleft').replace('d','arrowright'); handleInteractionStart(mappedKey); } }); document.addEventListener('keyup', (event) => { const keyName = event.key.toLowerCase(); if (['arrowup','w','arrowdown','s','arrowleft','a','arrowright','d'].includes(keyName)) { const mappedKey = keyName.replace('w','arrowup').replace('s','arrowdown').replace('a','arrowleft').replace('d','arrowright'); handleInteractionEnd(mappedKey); } });
+        }
+        setupControls();
+        function startSounds() { /* ... (same startSounds function) ... */
+             if (gameStarted) return; engineSound.play().then(() => { gameStarted = true; console.log("Engine sound started."); engineSound.volume = 0.4; startPilotChatterLoop(); }).catch(error => { console.error("Engine sound playback failed:", error); });
+        }
+        function playPilotChatter() { /* ... (same playPilotChatter function) ... */
+             if (!gameStarted || pilotChatterSound.readyState < 3) return; pilotChatterSound.currentTime = 0; pilotChatterSound.play().catch(e => {});
+        }
+        function startPilotChatterLoop() { /* ... (same startPilotChatterLoop function) ... */
+              if (pilotChatterInterval) clearInterval(pilotChatterInterval); function scheduleNextChatter() { const delay = Math.random() * 7000 + 6000; /* Longer delay maybe */ pilotChatterInterval = setTimeout(() => { playPilotChatter(); scheduleNextChatter(); }, delay); } scheduleNextChatter();
+        }
+
+        // --- Minimap Update Function ---
+        const minimapSize = minimapCanvas.width; const minimapHalfSize = minimapSize / 2;
+        const minimapScale = 1.2; // Zoom out minimap slightly for city
+        const playerIconSize = 8; const structureIconSize = 2; // Smaller structure icons
+
+        function updateMinimap(planeX, planeZ, planeRotY) { /* ... (same updateMinimap logic) ... */
+             minimapCtx.fillStyle = 'rgba(0, 10, 20, 0.75)'; /* Darker blue bg */ minimapCtx.fillRect(0, 0, minimapSize, minimapSize);
+             const houseColor = '#5ae05a'; const buildingColor = '#e05a5a';
+             activeStructures.forEach(struct => { const dx = struct.position.x - planeX; const dz = struct.position.z - planeZ; const mapX = minimapHalfSize + dx * minimapScale; const mapY = minimapHalfSize + dz * minimapScale; if (mapX < -structureIconSize || mapX > minimapSize + structureIconSize || mapY < -structureIconSize || mapY > minimapSize + structureIconSize) { return; } minimapCtx.fillStyle = (struct.userData.type === STRUCTURE_TYPE.BUILDING) ? buildingColor : houseColor; minimapCtx.fillRect(mapX - structureIconSize / 2, mapY - structureIconSize / 2, structureIconSize, structureIconSize); });
+             minimapCtx.save(); minimapCtx.translate(minimapHalfSize, minimapHalfSize); minimapCtx.rotate(-planeRotY); minimapCtx.fillStyle = '#00ffff'; minimapCtx.beginPath(); minimapCtx.moveTo(0, -playerIconSize * 0.66); minimapCtx.lineTo(-playerIconSize * 0.5, playerIconSize * 0.33); minimapCtx.lineTo(playerIconSize * 0.5, playerIconSize * 0.33); minimapCtx.closePath(); minimapCtx.fill(); minimapCtx.restore();
+        }
+
+
+        // --- Animation Loop ---
+        const planeWorldPosition = new THREE.Vector3(); const planeDirection = new THREE.Vector3();
+        const cameraTargetPosition = new THREE.Vector3(); const cameraOffset = new THREE.Vector3(0, 7.0, 18); // Further camera for city
+        const lookAtTargetPosition = new THREE.Vector3(); const lookAtOffset = new THREE.Vector3(0, 2.5, -50); // Look even further
+        const emitterWorldPos = new THREE.Vector3();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = Math.min(clock.getDelta(), 0.05);
+            const currentTime = clock.getElapsedTime();
+            frameCount++;
+
+            if (crashCooldown > 0) { crashCooldown -= delta; } else { crashed = false; }
+
+            // --- Plane Movement ---
+            if (!crashed) { /* ... */
+                 if (keysPressed['arrowleft']) { plane.rotation.y += turnSpeed * delta; } if (keysPressed['arrowright']) { plane.rotation.y -= turnSpeed * delta; }
+                 let trZ=0; if(keysPressed['arrowleft']){trZ=bankingFactor;} if(keysPressed['arrowright']){trZ=-bankingFactor;} plane.rotation.z += (trZ - plane.rotation.z) * 7 * delta;
+                 plane.translateZ(-forwardSpeed * delta);
+                 if (keysPressed['arrowup']) { plane.position.y += verticalSpeed * delta; } if (keysPressed['arrowdown']) { plane.position.y -= verticalSpeed * delta; }
+            }
+
+            // --- Crash Detection/Reset ---
+            plane.getWorldPosition(planeWorldPosition);
+             if (!crashed && planeWorldPosition.y < crashAltitudeThreshold && crashCooldown <= 0) { /* ... */
+                 crashed = true; crashCooldown = 1.5; if (gameStarted) { crashSound.currentTime = 0; crashSound.play().catch(e => {}); }
+                 plane.position.y = crashAltitudeThreshold + 6.0; // Bounce higher after crash
+                 plane.rotation.z *= 0.2; // Reduce bank drastically
+                 // Could add velocity reduction here too
+             }
+
+            // --- Update Ground Position ---
+            ground.position.x = planeWorldPosition.x;
+            ground.position.z = planeWorldPosition.z;
+
+            // --- Update Light Target ---
+            dirLight.target.position.lerp(planeWorldPosition, 0.04); // Slower light target
+
+            // --- Update Particle Trail ---
+             if (!crashed) { /* ... */
+                 plane.userData.emitter.getWorldPosition(emitterWorldPos); particlePositions[particleIndex * 3 + 0] = emitterWorldPos.x + (Math.random() - 0.5) * 0.5; particlePositions[particleIndex * 3 + 1] = emitterWorldPos.y + (Math.random() - 0.5) * 0.5; particlePositions[particleIndex * 3 + 2] = emitterWorldPos.z + (Math.random() - 0.5) * 0.5; particleAlphas[particleIndex] = 1.0; particleData[particleIndex].birthTime = currentTime; particleIndex = (particleIndex + 1) % maxParticles;
+             }
+             // Update existing particles
+             const posAttribute = particleGeometry.attributes.position; const alphaAttribute = particleGeometry.attributes.alpha; let needsPosUpdate = false; let needsAlphaUpdate = false; for (let i = 0; i < maxParticles; i++) { const data = particleData[i]; if (data.birthTime >= 0) { const age = currentTime - data.birthTime; if (age > particleLifetime) { if (alphaAttribute.getX(data.index) > 0) { alphaAttribute.setX(data.index, 0); needsAlphaUpdate = true; } data.birthTime = -1; } else { const newAlpha = Math.max(0, 1.0 - (age / particleLifetime)**1.5); if (alphaAttribute.getX(data.index) !== newAlpha) { alphaAttribute.setX(data.index, newAlpha); needsAlphaUpdate = true; } } } } if (needsPosUpdate || !crashed) posAttribute.needsUpdate = true; if (needsAlphaUpdate) alphaAttribute.needsUpdate = true;
+
+
+            // --- Structure Recycling ---
+             plane.getWorldDirection(planeDirection);
+             activeStructures.forEach(structure => { /* ... (same recycling logic) ... */
+                  structure.getWorldPosition(houseWorldPos); // Use the CORRECT variable
+                  vectorToHouse.subVectors(houseWorldPos, planeWorldPosition);
+                  const distanceAlongForward = vectorToHouse.dot(planeDirection);
+                  if (distanceAlongForward < -recycleDistance) {
+                      const spawnDist = spawnDistanceAheadMin + Math.random() * (spawnDistanceAheadMax - spawnDistanceAheadMin);
+                      const planeRight = new THREE.Vector3().crossVectors(plane.up, planeDirection).normalize();
+                      const sidewaysOffset = (Math.random() - 0.5) * 2 * spawnRadius;
+                      const newPos = planeWorldPosition.clone().add(planeDirection.clone().multiplyScalar(spawnDist)).add(planeRight.clone().multiplyScalar(sidewaysOffset));
+                      // OPTIONAL: Could remove the old structure and add a new random one here instead of just moving.
+                      // scene.remove(structure);
+                      // const newStructure = createStructure();
+                      // newStructure.position.set(newPos.x, 0, newPos.z);
+                      // newStructure.rotation.y = Math.floor(Math.random() * 4) * Math.PI / 2;
+                      // scene.add(newStructure);
+                      // activeStructures[activeStructures.indexOf(structure)] = newStructure; // Replace in array
+                      // -- Simpler move for now --
+                      structure.position.set(newPos.x, 0, newPos.z);
+                      structure.rotation.y = Math.floor(Math.random() * 4) * Math.PI / 2;
+                  }
+             });
+
+            // --- Update Camera ---
+            cameraTargetPosition.copy(planeWorldPosition).add(cameraOffset.clone().applyQuaternion(plane.quaternion));
+            camera.position.lerp(cameraTargetPosition, 0.05); // Slower camera follow for smoother city view
+
+            lookAtTargetPosition.copy(planeWorldPosition).add(lookAtOffset.clone().applyQuaternion(plane.quaternion));
+            camera.userData.lookAtTarget = camera.userData.lookAtTarget || new THREE.Vector3().copy(lookAtTargetPosition);
+            camera.userData.lookAtTarget.lerp(lookAtTargetPosition, 0.06); // Smoother lookAt
+            camera.lookAt(camera.userData.lookAtTarget);
+
+            // --- Update HUD ---
+            hudAltitude.textContent = `ALT: ${planeWorldPosition.y.toFixed(0)} m`;
+            currentSpeedKPH = forwardSpeed * 3.6;
+            hudSpeed.textContent = `SPD: ${currentSpeedKPH.toFixed(0)} kph`;
+
+             // --- Update Minimap (throttled) ---
+             if (frameCount % 3 === 0) { // Update minimap every 3rd frame (reduce load)
+                 updateMinimap(planeWorldPosition.x, planeWorldPosition.z, plane.rotation.y);
+             }
+
+            // --- Update Engine Sound Volume ---
+             if (gameStarted && !crashed) { engineSound.volume = THREE.MathUtils.lerp(0.5, 1.0, Math.min(1, currentSpeedKPH / 250)); /* Adjust scaling */}
+             else if (gameStarted && crashed) { engineSound.volume = THREE.MathUtils.lerp(engineSound.volume, 0.1, 0.1); }
+
+            // --- Render ---
+            renderer.render(scene, camera);
+        }
+
+        // --- Resize Listener ---
+        window.addEventListener('resize', () => { /* ... */ camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }, false);
+
+        // --- Start Animation ---
+        animate();
+
+    </script>
+
+</body>
+</html>
